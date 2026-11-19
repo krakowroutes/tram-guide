@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Трамвай №12 — Аудиогид по Кракову</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Telegram Web App SDK -->
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+</head>
+<body class="bg-slate-900 text-slate-100 font-sans antialiased pb-28">
+
+    <!-- Шапка приложения -->
+    <header class="sticky top-0 z-30 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 px-4 py-3">
+        <div class="flex items-center justify-between gap-2">
+            <div>
+                <span class="text-xs uppercase tracking-wider text-blue-400 font-semibold">Пилотный маршрут</span>
+                <h1 class="text-lg font-bold">Трамвай №12</h1>
+            </div>
+            <div class="flex items-center gap-2">
+                <div id="gps-status" class="flex items-center gap-1.5 text-xs bg-slate-800 px-2.5 py-1 rounded-full text-slate-300">
+                    <span id="gps-dot" class="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></span>
+                    <span id="gps-text">Поиск GPS...</span>
+                </div>
+                <button
+                    id="enable-gps-btn"
+                    type="button"
+                    onclick="requestGeolocationAgain()"
+                    class="hidden text-xs font-semibold bg-blue-600 hover:bg-blue-500 active:scale-95 text-white px-3 py-1.5 rounded-full transition"
+                >
+                    Включить GPS
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Основной контент -->
+    <main class="px-4 py-4 max-w-md mx-auto">
+        <!-- Пояснение о назначении геолокации -->
+        <section id="gps-info-box" class="mb-4 rounded-xl bg-blue-950/50 border border-blue-800/60 p-3.5 text-xs text-slate-200 leading-relaxed">
+            <div class="flex items-start justify-between gap-2">
+                <div>
+                    <p class="font-semibold text-blue-300 mb-1">Зачем нужна геолокация?</p>
+                    <p class="text-slate-300">
+                        Приложение определяет ваше положение относительно остановок (в радиусе ~60 м до и после точки в обе стороны движения), чтобы автоматически включать нужный рассказ. Координаты обрабатываются на устройстве и никуда не отправляются.
+                    </p>
+                </div>
+            </div>
+            <p id="gps-help-hint" class="hidden mt-2 pt-2 border-t border-blue-800/50 text-amber-300"></p>
+        </section>
+
+        <p class="text-sm text-slate-400 mb-4">
+            Садитесь в вагон, надевайте наушники. Истории включаются автоматически в пределах ~60 м от остановки в любом направлении или при нажатии на карточку.
+        </p>
+
+        <!-- Контейнер для списка остановок -->
+        <div id="stops-list" class="space-y-3">
+
+            <div class="stop-card bg-slate-800/60 border border-slate-700/50 rounded-xl p-3.5 flex items-center justify-between transition-all" data-id="1">
+                <div class="flex items-center gap-3">
+                    <div class="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center font-bold text-sm text-blue-400">1</div>
+                    <div>
+                        <h3 class="font-semibold text-white text-sm">Rondo Mogilskie</h3>
+                        <p class="text-xs text-slate-400">Форты, мозаики и подземный узел</p>
+                    </div>
+                </div>
+                <button type="button" onclick="playTrack(1, '01_rondo_mogilskie.mp3')" class="w-10 h-10 rounded-full bg-blue-600 hover:bg-blue-500 text-white flex items-center justify-center shadow-lg transition-transform active:scale-95 font-bold">
+                    ▶
+                </button>
+            </div>
+
+            <div class="stop-card bg-slate-800/60 border border-slate-700/50 rounded-xl p-3.5 flex items-center justify-between transition-all" data-id="2">
+                <div class="flex items-center gap-3">
+                    <div class="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center font-bold text-sm text-blue-400">2</div>
+                    <div>
+                        <h3 class="font-semibold text-white text-sm">Lubicz</h3>
+                        <p class="text-xs text-slate-400">Пивоварня и синяя ковка путепровода</p>
+                    </div>
+                </div>
+                <button type="button" onclick="playTrack(2, '02_lubicz.mp3')" class="w-10 h-10 rounded-full bg-blue-600 hover:bg-blue-500 text-white flex items-center justify-center shadow-lg transition-transform active:scale-95 font-bold">
+                    ▶
+                </button>
+            </div>
+
+            <div class="stop-card bg-slate-800/60 border border-slate-700/50 rounded-xl p-3.5 flex items-center justify-between transition-all" data-id="3">
+                <div class="flex items-center gap-3">
+                    <div class="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center font-bold text-sm text-blue-400">3</div>
+                    <div>
+                        <h3 class="font-semibold text-white text-sm">Teatr Słowackiego</h3>
+                        <p class="text-xs text-slate-400">Театр и электростанция «Дом Машин»</p>
+                    </div>
+                </div>
+                <button type="button" onclick="playTrack(3, '03_teatr_slowackiego.mp3')" class="w-10 h-10 rounded-full bg-blue-600 hover:bg-blue-500 text-white flex items-center justify-center shadow-lg transition-transform active:scale-95 font-bold">
+                    ▶
+                </button>
+            </div>
+
+            <div class="stop-card bg-slate-800/60 border border-slate-700/50 rounded-xl p-3.5 flex items-center justify-between transition-all" data-id="4">
+                <div class="flex items-center gap-3">
+                    <div class="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center font-bold text-sm text-blue-400">4</div>
+                    <div>
+                        <h3 class="font-semibold text-white text-sm">Poczta Główna</h3>
+                        <p class="text-xs text-slate-400">Почтамт и старинное депо пожарных</p>
+                    </div>
+                </div>
+                <button type="button" onclick="playTrack(4, '04_poczta_glowna.mp3')" class="w-10 h-10 rounded-full bg-blue-600 hover:bg-blue-500 text-white flex items-center justify-center shadow-lg transition-transform active:scale-95 font-bold">
+                    ▶
+                </button>
+            </div>
+
+            <div class="stop-card bg-slate-800/60 border border-slate-700/50 rounded-xl p-3.5 flex items-center justify-between transition-all" data-id="5">
+                <div class="flex items-center gap-3">
+                    <div class="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center font-bold text-sm text-blue-400">5</div>
+                    <div>
+                        <h3 class="font-semibold text-white text-sm">Starowiślna</h3>
+                        <p class="text-xs text
