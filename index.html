@@ -6,8 +6,44 @@
     <title>Трамвай №12 — Аудиогид по Кракову</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Leaflet CSS & JS (бесплатная карта без ключа) -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <!-- Telegram Web App SDK -->
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        /* Мягкая адаптация светлых тайлов карты под тёмно-синюю тему */
+        .dark-map-tiles .leaflet-tile-pane {
+            filter: brightness(0.72) contrast(1.12) saturate(0.85) hue-rotate(190deg) invert(1);
+        }
+        .stop-pin {
+            background: #2563eb;
+            color: #ffffff;
+            border: 2px solid #ffffff;
+            border-radius: 9999px;
+            width: 26px;
+            height: 26px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 12px;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.45);
+        }
+        .stop-pin-active {
+            background: #38bdf8;
+            color: #0f172a;
+            transform: scale(1.15);
+        }
+        .user-pin {
+            width: 16px;
+            height: 16px;
+            background: #38bdf8;
+            border: 3px solid #ffffff;
+            border-radius: 9999px;
+            box-shadow: 0 0 0 6px rgba(56, 189, 248, 0.35);
+        }
+    </style>
 </head>
 <body class="bg-slate-900 text-slate-100 font-sans antialiased pb-28">
 
@@ -27,7 +63,7 @@
                     id="enable-gps-btn"
                     type="button"
                     onclick="requestGeolocationAgain()"
-                    class="hidden text-xs font-semibold bg-blue-600 hover:bg-blue-500 active:scale-95 text-white px-3 py-1.5 rounded-full transition"
+                    class="text-xs font-semibold bg-blue-600 hover:bg-blue-500 active:scale-95 text-white px-3 py-1.5 rounded-full transition"
                 >
                     Включить GPS
                 </button>
@@ -39,19 +75,36 @@
     <main class="px-4 py-4 max-w-md mx-auto">
         <!-- Пояснение о назначении геолокации -->
         <section id="gps-info-box" class="mb-4 rounded-xl bg-blue-950/50 border border-blue-800/60 p-3.5 text-xs text-slate-200 leading-relaxed">
-            <div class="flex items-start justify-between gap-2">
-                <div>
-                    <p class="font-semibold text-blue-300 mb-1">Зачем нужна геолокация?</p>
-                    <p class="text-slate-300">
-                        Приложение определяет ваше положение относительно остановок (в радиусе ~60 м до и после точки в обе стороны движения), чтобы автоматически включать нужный рассказ. Координаты обрабатываются на устройстве и никуда не отправляются.
-                    </p>
-                </div>
+            <div>
+                <p class="font-semibold text-blue-300 mb-1">Зачем нужна геолокация?</p>
+                <p class="text-slate-300">
+                    Приложение отслеживает приближение к остановкам (в радиусе ~60 м до и после точки в обе стороны движения), чтобы вовремя включать рассказы и показывать вашу позицию на карте. Координаты обрабатываются только на вашем телефоне и никуда не передаются.
+                </p>
+                <p class="text-slate-400 mt-1.5">
+                    Для автозапуска убедитесь, что <span class="text-slate-200 font-medium">геолокация (GPS) включена в настройках самого телефона</span>, и разрешите доступ при запросе.
+                </p>
             </div>
-            <p id="gps-help-hint" class="hidden mt-2 pt-2 border-t border-blue-800/50 text-amber-300"></p>
+            <div id="gps-help-hint" class="hidden mt-2.5 pt-2.5 border-t border-blue-800/50 text-amber-300 space-y-1"></div>
+        </section>
+
+        <!-- Интерактивная карта маршрута -->
+        <section class="mb-4">
+            <div class="flex items-center justify-between mb-2">
+                <h2 class="text-xs uppercase tracking-wider text-blue-400 font-semibold">Карта маршрута и зоны 60 м</h2>
+                <button
+                    id="follow-btn"
+                    type="button"
+                    onclick="toggleFollowUser()"
+                    class="text-xs bg-slate-800 hover:bg-slate-700 text-blue-300 px-2.5 py-1 rounded-lg border border-slate-700 transition"
+                >
+                    Автоцентрирование: ВКЛ
+                </button>
+            </div>
+            <div id="route-map" class="dark-map-tiles w-full h-60 rounded-xl overflow-hidden border border-slate-700/80 shadow-lg z-10"></div>
         </section>
 
         <p class="text-sm text-slate-400 mb-4">
-            Садитесь в вагон, надевайте наушники. Истории включаются автоматически в пределах ~60 м от остановки в любом направлении или при нажатии на карточку.
+            Садитесь в вагон, надевайте наушники. Истории включаются автоматически в пределах 60 м от остановки в любом направлении или при нажатии на карточку либо точку на карте.
         </p>
 
         <!-- Контейнер для списка остановок -->
@@ -62,7 +115,7 @@
                     <div class="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center font-bold text-sm text-blue-400">1</div>
                     <div>
                         <h3 class="font-semibold text-white text-sm">Rondo Mogilskie</h3>
-                        <p class="text-xs text-slate-400">Форты, мозаики и подземный узел</p>
+                        <p class="text-xs text-slate-400">Форты и подземный узел</p>
                     </div>
                 </div>
                 <button type="button" onclick="playTrack(1, '01_rondo_mogilskie.mp3')" class="w-10 h-10 rounded-full bg-blue-600 hover:bg-blue-500 text-white flex items-center justify-center shadow-lg transition-transform active:scale-95 font-bold">
@@ -167,7 +220,7 @@
                     <div class="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center font-bold text-sm text-blue-400">9</div>
                     <div>
                         <h3 class="font-semibold text-white text-sm">Спасибо за прослушивание</h3>
-                        <p class="text-xs text-slate-400">Финальное напутствие и завершение маршрута</p>
+                        <p class="text-xs text-slate-400">Это не конец историй. Будут новые пуи и маршруты</p>
                     </div>
                 </div>
                 <button type="button" onclick="playTrack(9, '09_good_bye.mp3')" class="w-10 h-10 rounded-full bg-blue-600 hover:bg-blue-500 text-white flex items-center justify-center shadow-lg transition-transform active:scale-95 font-bold">

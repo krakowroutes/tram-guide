@@ -27,7 +27,110 @@ const stops = [
     { id: 9, name: "Спасибо за прослушивание", file: "09_good_bye.mp3", lat: null, lng: null, radius: 0 }
 ];
 
-// Функция воспроизведения трека
+// --- КАРТА (LEAFLET) ---
+let map = null;
+let userMarker = null;
+let followUser = true;
+const stopMarkers = {};
+
+function initMap() {
+    const mapContainer = document.getElementById('route-map');
+    if (!mapContainer || typeof L === 'undefined') return;
+
+    const geoStops = stops.filter(s => s.lat !== null && s.lng !== null);
+    const routeLatLngs = geoStops.map(s => [s.lat, s.lng]);
+
+    map = L.map('route-map', {
+        zoomControl: true,
+        attributionControl: false
+    }).setView(routeLatLngs[0] || [50.0614, 19.9383], 14);
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19
+    }).addTo(map);
+
+    // Выделенная линия маршрута
+    if (routeLatLngs.length > 1) {
+        const routeLine = L.polyline(routeLatLngs, {
+            color: '#38bdf8',
+            weight: 4,
+            opacity: 0.9
+        }).addTo(map);
+        map.fitBounds(routeLine.getBounds(), { padding: [20, 20] });
+    }
+
+    // Остановки и симметричные геозоны 60 м
+    geoStops.forEach(stop => {
+        L.circle([stop.lat, stop.lng], {
+            radius: stop.radius,
+            color: '#60a5fa',
+            weight: 1.5,
+            fillColor: '#3b82f6',
+            fillOpacity: 0.16
+        }).addTo(map);
+
+        const icon = L.divIcon({
+            className: 'custom-stop-marker',
+            html: `<div id="map-pin-${stop.id}" class="stop-pin">${stop.id}</div>`,
+            iconSize: [26, 26],
+            iconAnchor: [13, 13]
+        });
+
+        const marker = L.marker([stop.lat, stop.lng], { icon })
+            .addTo(map)
+            .bindPopup(`<b>${stop.id}. ${stop.name}</b><br>Зона срабатывания: ${stop.radius} м`);
+
+        marker.on('click', () => {
+            playTrack(stop.id, stop.file);
+        });
+
+        stopMarkers[stop.id] = marker;
+    });
+}
+
+function updateUserOnMap(lat, lng) {
+    if (!map || typeof L === 'undefined') return;
+
+    if (!userMarker) {
+        const userIcon = L.divIcon({
+            className: 'custom-user-marker',
+            html: '<div class="user-pin"></div>',
+            iconSize: [16, 16],
+            iconAnchor: [8, 8]
+        });
+        userMarker = L.marker([lat, lng], { icon: userIcon, zIndexOffset: 1000 })
+            .addTo(map)
+            .bindPopup('Вы здесь');
+    } else {
+        userMarker.setLatLng([lat, lng]);
+    }
+
+    if (followUser) {
+        map.panTo([lat, lng], { animate: true, duration: 0.6 });
+    }
+}
+
+function highlightActiveStopOnMap(activeId) {
+    Object.keys(stopMarkers).forEach(id => {
+        const pinEl = document.getElementById(`map-pin-${id}`);
+        if (pinEl) {
+            pinEl.classList.toggle('stop-pin-active', parseInt(id, 10) === activeId);
+        }
+    });
+}
+
+function toggleFollowUser() {
+    followUser = !followUser;
+    const btn = document.getElementById('follow-btn');
+    if (btn) {
+        btn.innerText = followUser ? 'Автоцентрирование: ВКЛ' : 'Автоцентрирование: ВЫКЛ';
+    }
+    if (followUser && userMarker && map) {
+        map.panTo(userMarker.getLatLng(), { animate: true });
+    }
+}
+
+// --- ПЛЕЕР ---
 function playTrack(id, filename) {
     const stop = stops.find(s => s.id === id);
     if (!stop) return;
@@ -56,6 +159,13 @@ function playTrack(id, filename) {
         isPlaying = true;
         updatePlayerUI(stop.name, "Воспроизведение...", "⏸");
         highlightActiveCard(id);
+        highlightActiveStopOnMap(id);
+        if (stop.lat && stop.lng && map) {
+            followUser = false;
+            const btn = document.getElementById('follow-btn');
+            if (btn) btn.innerText = 'Автоцентрирование: ВЫКЛ';
+            map.setView([stop.lat, stop.lng], 15, { animate: true });
+        }
     }).catch(error => {
         console.error("Ошибка воспроизведения:", error);
         updatePlayerUI(stop.name, "Ошибка загрузки файла", "▶");
@@ -73,7 +183,6 @@ function playTrack(id, filename) {
     };
 }
 
-// Управление нижней панелью плеера
 function togglePlay() {
     if (!currentAudio && stops.length > 0) {
         playTrack(stops[0].id, stops[0].file);
@@ -109,12 +218,12 @@ function highlightActiveCard(id) {
     });
 }
 
-// --- GPS, ПОВТОРНЫЙ ЗАПРОС И СИММЕТРИЧНЫЙ ГЕОФЕНСИНГ ---
+// --- GPS, ПОЯСНЕНИЕ ПРО СИСТЕМНЫЙ GPS И СИММЕТРИЧНЫЙ ГЕОФЕНСИНГ ---
 
 let watchId = null;
 let lastTriggeredStopId = null;
 
-function setGpsUiState({ label, dotColorClass, showEnableButton, hintText = "" }) {
+function setGpsUiState({ label, dotColorClass, showEnableButton, hintLines = [] }) {
     const gpsText = document.getElementById('gps-text');
     const dot = document.getElementById('gps-dot');
     const enableBtn = document.getElementById('enable-gps-btn');
@@ -131,11 +240,11 @@ function setGpsUiState({ label, dotColorClass, showEnableButton, hintText = "" }
     }
 
     if (hintEl) {
-        if (hintText) {
-            hintEl.innerText = hintText;
+        if (hintLines.length > 0) {
+            hintEl.innerHTML = hintLines.map(line => `<p>${line}</p>`).join("");
             hintEl.classList.remove('hidden');
         } else {
-            hintEl.innerText = "";
+            hintEl.innerHTML = "";
             hintEl.classList.add('hidden');
         }
     }
@@ -149,9 +258,10 @@ function handlePositionSuccess(position) {
         label: "GPS активен",
         dotColorClass: "bg-emerald-500",
         showEnableButton: false,
-        hintText: ""
+        hintLines: []
     });
 
+    updateUserOnMap(userLat, userLng);
     checkGeofences(userLat, userLng);
 }
 
@@ -160,35 +270,54 @@ function handlePositionError(error) {
 
     if (error.code === error.PERMISSION_DENIED) {
         setGpsUiState({
+            label: "Доступ запрещён",
+            dotColorClass: "bg-rose-500",
+            showEnableButton: true,
+            hintLines: [
+                "1. Включите системный тумблер «Геолокация / GPS» в верхней шторке или настройках самого телефона (приложение не может включить его само).",
+                "2. Разрешите доступ к геопозиции для Telegram в настройках смартфона и нажмите «Включить GPS»."
+            ]
+        });
+    } else if (error.code === error.POSITION_UNAVAILABLE) {
+        setGpsUiState({
             label: "GPS выключен",
             dotColorClass: "bg-rose-500",
             showEnableButton: true,
-            hintText: "Доступ к геолокации отклонён. Нажмите «Включить GPS» или разрешите геолокацию для Telegram и браузера в настройках телефона."
+            hintLines: [
+                "На телефоне отключён системный модуль GPS или нет сигнала спутников.",
+                "Включите «Геолокацию / GPS» в шторке телефона, затем нажмите «Включить GPS»."
+            ]
         });
     } else if (error.code === error.TIMEOUT) {
         setGpsUiState({
             label: "GPS не отвечает",
             dotColorClass: "bg-blue-400 animate-pulse",
             showEnableButton: true,
-            hintText: "Сигнал GPS слабый (например, в плотной застройке). Нажмите «Включить GPS», чтобы повторить поиск."
+            hintLines: [
+                "Не удалось получить координаты вовремя. Проверьте, что системный GPS на телефоне включён, и нажмите «Включить GPS»."
+            ]
         });
     } else {
         setGpsUiState({
             label: "Нет доступа к GPS",
             dotColorClass: "bg-rose-500",
             showEnableButton: true,
-            hintText: "Не удалось получить координаты. Проверьте, включена ли геолокация на устройстве, и нажмите «Включить GPS»."
+            hintLines: [
+                "Включите системный GPS в настройках телефона и разрешите доступ Telegram, затем нажмите «Включить GPS»."
+            ]
         });
     }
 }
 
-function startGeolocationWatcher() {
+function startGeolocationWatcher(isManualRetry = false) {
     if (!navigator.geolocation) {
         setGpsUiState({
             label: "GPS недоступен",
             dotColorClass: "bg-rose-500",
             showEnableButton: false,
-            hintText: "Устройство или веб-среда не поддерживают геолокацию. Выбирайте остановки вручную."
+            hintLines: [
+                "Ваш браузер или устройство не поддерживают определение координат. Запускайте треки вручную нажатием на остановку."
+            ]
         });
         return;
     }
@@ -201,8 +330,10 @@ function startGeolocationWatcher() {
     setGpsUiState({
         label: "Поиск GPS...",
         dotColorClass: "bg-blue-500 animate-pulse",
-        showEnableButton: false,
-        hintText: ""
+        showEnableButton: true,
+        hintLines: isManualRetry
+            ? ["Проверяем доступ к координатам. Если системный GPS на телефоне выключен — включите его в шторке устройства."]
+            : []
     });
 
     const geoOptions = {
@@ -224,12 +355,10 @@ function startGeolocationWatcher() {
     );
 }
 
-// Вызывается кнопкой «Включить GPS» из интерфейса
 function requestGeolocationAgain() {
-    startGeolocationWatcher();
+    startGeolocationWatcher(true);
 }
 
-// Расстояние между точками по формуле гаверсинусов (в метрах)
 function getDistanceFromLatLonInMeters(lat1, lon1, lat2, lon2) {
     const R = 6371000;
     const dLat = deg2rad(lat2 - lat1);
@@ -246,7 +375,6 @@ function deg2rad(deg) {
     return deg * (Math.PI / 180);
 }
 
-// Симметричная проверка до и после остановки (радиус 60 м в любую сторону)
 function checkGeofences(lat, lng) {
     if (lastTriggeredStopId !== null) {
         const activeStop = stops.find(s => s.id === lastTriggeredStopId);
@@ -271,5 +399,6 @@ function checkGeofences(lat, lng) {
 }
 
 window.onload = () => {
-    startGeolocationWatcher();
+    initMap();
+    startGeolocationWatcher(false);
 };
