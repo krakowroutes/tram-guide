@@ -6,19 +6,24 @@ if (tg) {
 
 // Глобальные переменные плеера
 let currentAudio = null;
+let jingleAudio = null;
 let currentTrackId = null;
 let isPlaying = false;
+let isPlayingJingle = false;
+
+// Имя файла короткого закрывающего джингл-трека (положи в корень репозитория или audio/)
+const END_JINGLE_FILE = "jingle_end.mp3";
 
 // Симметричный порог срабатывания: 60 м до и после остановки в обоих направлениях
 const SYMMETRIC_TRIGGER_METERS = 60;
 // Радиус выхода из зоны: 95 м — чтобы GPS не «дёргал» трек при небольших колебаниях координат
 const EXIT_ZONE_METERS = 95;
 
-// Список остановок (все файлы в формате .mp3)
+// Список остановок (Teatr Słowackiego поправлен ближе к узлу у театра)
 const stops = [
     { id: 1, name: "Rondo Mogilskie", file: "01_rondo_mogilskie.mp3", lat: 50.0664, lng: 19.9593, radius: SYMMETRIC_TRIGGER_METERS },
     { id: 2, name: "Lubicz", file: "02_lubicz.mp3", lat: 50.0648, lng: 19.9512, radius: SYMMETRIC_TRIGGER_METERS },
-    { id: 3, name: "Teatr Słowackiego", file: "03_teatr_slowackiego.mp3", lat: 50.0637, lng: 19.9431, radius: SYMMETRIC_TRIGGER_METERS },
+    { id: 3, name: "Teatr Słowackiego", file: "03_teatr_slowackiego.mp3", lat: 50.0643, lng: 19.9425, radius: SYMMETRIC_TRIGGER_METERS },
     { id: 4, name: "Poczta Główna", file: "04_poczta_glowna.mp3", lat: 50.0605, lng: 19.9422, radius: SYMMETRIC_TRIGGER_METERS },
     { id: 5, name: "Starowiślna", file: "05_starowislna.mp3", lat: 50.0573, lng: 19.9448, radius: SYMMETRIC_TRIGGER_METERS },
     { id: 6, name: "Stradom", file: "06_stradom.mp3", lat: 50.0531, lng: 19.9425, radius: SYMMETRIC_TRIGGER_METERS },
@@ -26,6 +31,184 @@ const stops = [
     { id: 8, name: "Rondo Grunwaldzkie", file: "08_rondo_grunwaldzkie.mp3", lat: 50.0512, lng: 19.9365, radius: SYMMETRIC_TRIGGER_METERS },
     { id: 9, name: "Спасибо за прослушивание", file: "09_good_bye.mp3", lat: null, lng: null, radius: 0 }
 ];
+
+function formatTime(sec) {
+    if (!Number.isFinite(sec) || sec < 0) return "0:00";
+    const mins = Math.floor(sec / 60);
+    const rem = Math.floor(sec % 60);
+    return `${mins}:${rem < 10 ? "0" : ""}${rem}`;
+}
+
+function syncProgressUI() {
+    const slider = document.getElementById('seek-slider');
+    const curEl = document.getElementById('time-current');
+    const durEl = document.getElementById('time-duration');
+
+    if (!currentAudio || !Number.isFinite(currentAudio.duration) || currentAudio.duration <= 0) {
+        if (slider) {
+            slider.max = 100;
+            slider.value = 0;
+        }
+        if (curEl) curEl.innerText = "0:00";
+        if (durEl) durEl.innerText = "0:00";
+        return;
+    }
+
+    if (slider) {
+        slider.max = currentAudio.duration;
+        slider.value = currentAudio.currentTime;
+    }
+    if (curEl) curEl.innerText = formatTime(currentAudio.currentTime);
+    if (durEl) curEl.innerText = formatTime(currentAudio.currentTime);
+    if (durEl) durEl.innerText = formatTime(currentAudio.duration);
+}
+
+function attachAudioListeners(audio, stop) {
+    audio.addEventListener("loadedmetadata", syncProgressUI);
+    audio.addEventListener("timeupdate", syncProgressUI);
+
+    audio.onended = () => {
+        isPlaying = false;
+        updatePlayerUI(stop.name, "Трек завершен", "▶");
+        syncProgressUI();
+
+        // Закрывающий короткий джингл в конце истории (для остановок 1..8)
+        if (stop.id >= 1 && stop.id <= 8) {
+            playEndJingle(() => {
+                if (stop.id === 8) {
+                    setTimeout(() => {
+                        playTrack(9, '09_good_bye.mp3');
+                    }, 600);
+                }
+            });
+        }
+    };
+}
+
+function playEndJingle(onDone) {
+    if (jingleAudio) {
+        jingleAudio.pause();
+        jingleAudio = null;
+    }
+
+    const audio = new Audio(`${END_JINGLE_FILE}`);
+    jingleAudio = audio;
+    isPlayingJingle = true;
+
+    const finish = () => {
+        if (!isPlayingJingle) return;
+        isPlayingJingle = false;
+        jingleAudio = null;
+        if (typeof onDone === "function") onDone();
+    };
+
+    audio.onended = finish;
+    audio.onerror = finish;
+
+    audio.play().catch(() => {
+        finish();
+    });
+}
+
+// Функция воспроизведения трека
+function playTrack(id, filename) {
+    const stop = stops.find(s => s.id === id);
+    if (!stop) return;
+
+    if (jingleAudio) {
+        jingleAudio.pause();
+        jingleAudio = null;
+        isPlayingJingle = false;
+    }
+
+    if (currentTrackId === id && currentAudio) {
+        if (isPlaying) {
+            currentAudio.pause();
+            isPlaying = false;
+            updatePlayerUI(stop.name, "Пауза", "▶");
+        } else {
+            currentAudio.play();
+            isPlaying = true;
+            updatePlayerUI(stop.name, "Воспроизведение...", "⏸");
+        }
+        return;
+    }
+
+    if (currentAudio) {
+        currentAudio.pause();
+    }
+
+    currentAudio = new Audio(`${filename}`);
+    currentTrackId = id;
+    attachAudioListeners(currentAudio, stop);
+
+    currentAudio.play().then(() => {
+        isPlaying = true;
+        updatePlayerUI(stop.name, "Воспроизведение...", "⏸");
+        highlightActiveCard(id);
+        highlightActiveStopOnMap(id);
+        if (stop.lat && stop.lng && map) {
+            followUser = false;
+            const btn = document.getElementById('follow-btn');
+            if (btn) btn.innerText = 'Автоцентрирование: ВЫКЛ';
+            map.setView([stop.lat, stop.lng], 15, { animate: true });
+        }
+    }).catch(error => {
+        console.error("Ошибка воспроизведения:", error);
+        updatePlayerUI(stop.name, "Ошибка загрузки файла", "▶");
+    });
+}
+
+// Перемотка назад / вперёд на заданное число секунд
+function seekBy(deltaSeconds) {
+    if (!currentAudio || !Number.isFinite(currentAudio.duration)) return;
+    const nextTime = Math.max(0, Math.min(currentAudio.duration, currentAudio.currentTime + deltaSeconds));
+    currentAudio.currentTime = nextTime;
+    syncProgressUI();
+}
+
+// Перемотка ползунком
+function onSeekSliderInput(value) {
+    if (!currentAudio || !Number.isFinite(currentAudio.duration)) return;
+    currentAudio.currentTime = Number(value);
+    syncProgressUI();
+}
+
+// Управление нижней панелью плеера
+function togglePlay() {
+    if (!currentAudio && stops.length > 0) {
+        playTrack(stops[0].id, stops[0].file);
+        return;
+    }
+    if (currentAudio) {
+        if (isPlaying) {
+            currentAudio.pause();
+            isPlaying = false;
+            document.getElementById('play-pause-btn').innerText = "▶";
+            document.getElementById('player-status').innerText = "Пауза";
+        } else {
+            currentAudio.play();
+            isPlaying = true;
+            document.getElementById('play-pause-btn').innerText = "⏸";
+            document.getElementById('player-status').innerText = "Воспроизведение...";
+        }
+    }
+}
+
+function updatePlayerUI(trackTitle, statusText, buttonIcon) {
+    document.getElementById('current-track-title').innerText = trackTitle;
+    document.getElementById('player-status').innerText = statusText;
+    document.getElementById('play-pause-btn').innerText = buttonIcon;
+}
+
+function highlightActiveCard(id) {
+    document.querySelectorAll('.stop-card').forEach(card => {
+        card.classList.remove('border-blue-500', 'bg-slate-800/90');
+        if (parseInt(card.dataset.id, 10) === id) {
+            card.classList.add('border-blue-500', 'bg-slate-800/90');
+        }
+    });
+}
 
 // --- КАРТА (LEAFLET) ---
 let map = null;
@@ -49,7 +232,6 @@ function initMap() {
         maxZoom: 19
     }).addTo(map);
 
-    // Выделенная линия маршрута
     if (routeLatLngs.length > 1) {
         const routeLine = L.polyline(routeLatLngs, {
             color: '#38bdf8',
@@ -59,7 +241,6 @@ function initMap() {
         map.fitBounds(routeLine.getBounds(), { padding: [20, 20] });
     }
 
-    // Остановки и симметричные геозоны 60 м
     geoStops.forEach(stop => {
         L.circle([stop.lat, stop.lng], {
             radius: stop.radius,
@@ -130,98 +311,11 @@ function toggleFollowUser() {
     }
 }
 
-// --- ПЛЕЕР ---
-function playTrack(id, filename) {
-    const stop = stops.find(s => s.id === id);
-    if (!stop) return;
-
-    if (currentTrackId === id && currentAudio) {
-        if (isPlaying) {
-            currentAudio.pause();
-            isPlaying = false;
-            updatePlayerUI(stop.name, "Пауза", "▶");
-        } else {
-            currentAudio.play();
-            isPlaying = true;
-            updatePlayerUI(stop.name, "Воспроизведение...", "⏸");
-        }
-        return;
-    }
-
-    if (currentAudio) {
-        currentAudio.pause();
-    }
-
-    currentAudio = new Audio(`audio/${filename}`);
-    currentTrackId = id;
-
-    currentAudio.play().then(() => {
-        isPlaying = true;
-        updatePlayerUI(stop.name, "Воспроизведение...", "⏸");
-        highlightActiveCard(id);
-        highlightActiveStopOnMap(id);
-        if (stop.lat && stop.lng && map) {
-            followUser = false;
-            const btn = document.getElementById('follow-btn');
-            if (btn) btn.innerText = 'Автоцентрирование: ВЫКЛ';
-            map.setView([stop.lat, stop.lng], 15, { animate: true });
-        }
-    }).catch(error => {
-        console.error("Ошибка воспроизведения:", error);
-        updatePlayerUI(stop.name, "Ошибка загрузки файла", "▶");
-    });
-
-    currentAudio.onended = () => {
-        isPlaying = false;
-        updatePlayerUI(stop.name, "Трек завершен", "▶");
-
-        if (id === 8) {
-            setTimeout(() => {
-                playTrack(9, '09_good_bye.mp3');
-            }, 1000);
-        }
-    };
-}
-
-function togglePlay() {
-    if (!currentAudio && stops.length > 0) {
-        playTrack(stops[0].id, stops[0].file);
-        return;
-    }
-    if (currentAudio) {
-        if (isPlaying) {
-            currentAudio.pause();
-            isPlaying = false;
-            document.getElementById('play-pause-btn').innerText = "▶";
-            document.getElementById('player-status').innerText = "Пауза";
-        } else {
-            currentAudio.play();
-            isPlaying = true;
-            document.getElementById('play-pause-btn').innerText = "⏸";
-            document.getElementById('player-status').innerText = "Воспроизведение...";
-        }
-    }
-}
-
-function updatePlayerUI(trackTitle, statusText, buttonIcon) {
-    document.getElementById('current-track-title').innerText = trackTitle;
-    document.getElementById('player-status').innerText = statusText;
-    document.getElementById('play-pause-btn').innerText = buttonIcon;
-}
-
-function highlightActiveCard(id) {
-    document.querySelectorAll('.stop-card').forEach(card => {
-        card.classList.remove('border-blue-500', 'bg-slate-800/90');
-        if (parseInt(card.dataset.id, 10) === id) {
-            card.classList.add('border-blue-500', 'bg-slate-800/90');
-        }
-    });
-}
-
-// --- GPS, ПОЯСНЕНИЕ ПРО СИСТЕМНЫЙ GPS И СИММЕТРИЧНЫЙ ГЕОФЕНСИНГ ---
+// --- GPS, ВОЗВРАТ В ОКНО И СИММЕТРИЧНЫЙ ГЕОФЕНСИНГ ---
 
 let watchId = null;
 let lastTriggeredStopId = null;
+let isGpsGrantedOnce = false;
 
 function setGpsUiState({ label, dotColorClass, showEnableButton, hintLines = [] }) {
     const gpsText = document.getElementById('gps-text');
@@ -251,6 +345,7 @@ function setGpsUiState({ label, dotColorClass, showEnableButton, hintLines = [] 
 }
 
 function handlePositionSuccess(position) {
+    isGpsGrantedOnce = true;
     const userLat = position.coords.latitude;
     const userLng = position.coords.longitude;
 
@@ -309,7 +404,7 @@ function handlePositionError(error) {
     }
 }
 
-function startGeolocationWatcher(isManualRetry = false) {
+function startGeolocationWatcher(isManualRetry = false, isResume = false) {
     if (!navigator.geolocation) {
         setGpsUiState({
             label: "GPS недоступен",
@@ -327,26 +422,32 @@ function startGeolocationWatcher(isManualRetry = false) {
         watchId = null;
     }
 
-    setGpsUiState({
-        label: "Поиск GPS...",
-        dotColorClass: "bg-blue-500 animate-pulse",
-        showEnableButton: true,
-        hintLines: isManualRetry
-            ? ["Проверяем доступ к координатам. Если системный GPS на телефоне выключен — включите его в шторке устройства."]
-            : []
-    });
+    if (!isResume) {
+        setGpsUiState({
+            label: "Поиск GPS...",
+            dotColorClass: "bg-blue-500 animate-pulse",
+            showEnableButton: true,
+            hintLines: isManualRetry
+                ? ["Проверяем доступ к координатам. Если системный GPS на телефоне выключен — включите его в шторке устройства."]
+                : []
+        });
+    }
 
     const geoOptions = {
         enableHighAccuracy: true,
-        maximumAge: 5000,
+        maximumAge: 4000,
         timeout: 15000
     };
 
-    navigator.geolocation.getCurrentPosition(
-        handlePositionSuccess,
-        handlePositionError,
-        geoOptions
-    );
+    // Вызываем getCurrentPosition только при первом запуске или ручном нажатии кнопки,
+    // чтобы при возврате из свёрнутого окна не провоцировать лишние запросы разрешения
+    if (!isResume || !isGpsGrantedOnce) {
+        navigator.geolocation.getCurrentPosition(
+            handlePositionSuccess,
+            handlePositionError,
+            geoOptions
+        );
+    }
 
     watchId = navigator.geolocation.watchPosition(
         handlePositionSuccess,
@@ -356,7 +457,23 @@ function startGeolocationWatcher(isManualRetry = false) {
 }
 
 function requestGeolocationAgain() {
-    startGeolocationWatcher(true);
+    startGeolocationWatcher(true, false);
+}
+
+// При возврате пользователя в окно приложения мягко восстанавливаем слежение и проверяем текущую геозону
+document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") {
+        startGeolocationWatcher(false, true);
+    } else if (watchId !== null) {
+        navigator.geolocation.clearWatch(watchId);
+        watchId = null;
+    }
+});
+
+if (tg && typeof tg.onEvent === "function") {
+    tg.onEvent("activated", () => {
+        startGeolocationWatcher(false, true);
+    });
 }
 
 function getDistanceFromLatLonInMeters(lat1, lon1, lat2, lon2) {
@@ -400,5 +517,5 @@ function checkGeofences(lat, lng) {
 
 window.onload = () => {
     initMap();
-    startGeolocationWatcher(false);
+    startGeolocationWatcher(false, false);
 };
